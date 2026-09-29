@@ -27,6 +27,12 @@ local S = {
     idleTO   = "\232\167\146\232\137\178\233\151\178\231\189\174\232\182\133\230\151\182", -- 角色闲置超时 (guess; will fallback)
     setting  = "\232\174\190\231\189\174",             -- 设置
     settingF = "\231\142\169\229\174\182\228\191\174\230\148\185\232\174\190\231\189\174", -- 玩家修改设置
+    guild    = "\229\133\172\228\188\154",             -- 公会
+    donate   = "\230\141\144\231\140\174",             -- 捐献
+    spin     = "\232\189\172\231\155\152",             -- 转盘
+    spinDraw = "\230\138\189\229\165\150",             -- 抽奖
+    online   = "\232\138\130\230\151\165\230\180\187\229\138\168", -- 节日活动
+    onlineR  = "\233\162\134\229\143\150\229\165\150\229\138\177", -- 领取奖励
 }
 
 local function eventsRoot() return RS:WaitForChild(S.events, 10) end
@@ -163,6 +169,71 @@ loop("eggInterval", "autoEgg", function()
     safeFire(S.egg, S.hatch, nil)
 end, "Egg")
 
+-- ========== Daily Cache (persist per day via file) ==========
+local DAILY_FILE = "newcultivation_daily.json"
+local HttpService = game:GetService("HttpService")
+
+local function todayKey()
+    return os.date("%Y-%m-%d")
+end
+
+local hasFileAPI = (typeof(readfile) == "function") and (typeof(writefile) == "function") and (typeof(isfile) == "function")
+
+local function loadDaily()
+    if not hasFileAPI then
+        log("No file API - daily cache session-only")
+        return { date = todayKey(), guild = false, spin = false, online = false }
+    end
+    local ok, raw = pcall(function() return isfile(DAILY_FILE) and readfile(DAILY_FILE) or nil end)
+    if ok and raw then
+        local ok2, data = pcall(function() return HttpService:JSONDecode(raw) end)
+        if ok2 and data and data.date == todayKey() then
+            return data
+        end
+    end
+    return { date = todayKey(), guild = false, spin = false, online = false }
+end
+
+local function saveDaily(d)
+    if not hasFileAPI then return end
+    pcall(writefile, DAILY_FILE, HttpService:JSONEncode(d))
+end
+
+local dailyDone = loadDaily()
+
+local function doGuildContrib()
+    if dailyDone.guild then log("Guild contribute already done") return end
+    dailyDone.guild = true
+    saveDaily(dailyDone)
+    for i = 1, 5 do
+        safeFire(S.guild, S.donate, nil)
+        task.wait(0.3)
+    end
+    log("Guild contribute 5x done")
+end
+
+local function doDailySpin()
+    if dailyDone.spin then log("Daily spin already done") return end
+    dailyDone.spin = true
+    saveDaily(dailyDone)
+    for i = 1, 3 do
+        safeFire(S.spin, S.spinDraw, nil)
+        task.wait(0.3)
+    end
+    log("Daily spin 3x done")
+end
+
+local function doOnlineReward()
+    if dailyDone.online then log("Online reward already done") return end
+    dailyDone.online = true
+    saveDaily(dailyDone)
+    for i = 1, 6 do
+        safeFire(S.online, S.onlineR, i)
+        task.wait(0.3)
+    end
+    log("Online reward 1-6 done")
+end
+
 -- ========== UI ==========
 local Window = Rayfield:CreateWindow({
     Name = "newcultivation Hub",
@@ -223,6 +294,15 @@ T3:CreateSlider({ Name = "Hatch Interval (s)", Range = {1, 30}, Increment = 1,
     Callback = function(v) State.eggInterval = v end })
 T3:CreateButton({ Name = "Hatch Once",
     Callback = function() safeFire(S.egg, S.hatch, nil) end })
+
+-- Daily tab
+local TD = Window:CreateTab("Daily")
+TD:CreateButton({ Name = "Guild Contribute x5 (捐献)",
+    Callback = function() task.spawn(doGuildContrib) end })
+TD:CreateButton({ Name = "Daily Spin x3 (转盘抽奖)",
+    Callback = function() task.spawn(doDailySpin) end })
+TD:CreateButton({ Name = "Event Online Reward 1-6 (领取奖励)",
+    Callback = function() task.spawn(doOnlineReward) end })
 
 -- Debug tab
 local T4 = Window:CreateTab("Debug")
